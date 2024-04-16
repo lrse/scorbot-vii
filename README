@@ -1,0 +1,24 @@
+Instrucciones para montar:
+
+    Firmware: 
+        En la carpeta ./software_scorbot/firmware-scorbot-master/ están los datos del firmware.
+        En la carpeta libraries hay algunas bibliotecas que se deben poner en la carpeta 
+        de bibliotecas del programador de Arduino en caso de usarlo.
+
+        La carpeta /brazo_central se encuentran los archivos de firmware del Arduino MEGA 2560
+        La carpeta /brazo_pid tiene los archivos de firmware de los Arduinos MINI 
+        (todos tienen el mismo código, pero se tienen que cargar unas constantes desde el MEGA, poniendo el 1 la constante SETEAR_CONSTS)
+        La carpeta /garra tiene el programa del Arduino UNO
+
+    Software:
+        En /software_scorbot/scorbot_catkin_workspace/src/scorbot están los archivos para el paquete "scorbot" que se comunica con el scorbot y tiene el archivo scorbot.launch que lanza todo lo necesario para controlarlo directamente.
+
+        En /teleop_packages se encuentran 3 paquetes de ROS que son necesarios para controlar el robot directamente y deben ser cargados manualmente.
+        Los 3 tienen que ser armados y sourceados. En la carpeta hay un programa de python que al correrlo por terminal te imprime un mensaje que al copiarlo y escribirlo por la terminal
+        sourcea los 3 paquetes.
+
+    Simulación:
+        En /modelo_scorbot_gazebo/src se encuentran los archivos de dos paquetes de ros: 
+            scorbot_tf es la simulación en gazebo y rviz, tiene scorbot_joint_test.launch que 
+            lanza la simulación.
+            sim_scorbot_master es un WIP, una simulación del firmware del MEGA 2560 para probar en simulación cualquier cambio.
