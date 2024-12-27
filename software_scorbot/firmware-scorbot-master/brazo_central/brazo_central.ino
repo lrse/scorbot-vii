@@ -39,17 +39,17 @@
 #define RAD2ENC5(x) ((int32_t)(x / (float)-0.000163399) + 2200)
 */
 
-#define ENC2RAD1(x) ((x)  * (float)0.000034142)
-#define ENC2RAD2(x) ((x) * (float)0.000030712)
-#define ENC2RAD3(x) ((x) * (float)-0.000032903)
-#define ENC2RAD4(x) ((x)     * (float)-0.000054786)
-#define ENC2RAD5(x) ((x)  * (float)-0.000163399)
+#define ENC2RAD1(x) ((x)  * (double)-0.000034142)
+#define ENC2RAD2(x) (((x)  * (double)-0.000030712) + (double)1.484)
+#define ENC2RAD3(x) ((x)  * (double)0.000032903)
+#define ENC2RAD4(x) ((x)  * (double)0.000054786)
+#define ENC2RAD5(x) ((x)  * (double)0.000163399)
 
-#define RAD2ENC1(x) ((int32_t)(x / (float)0.000034142))
-#define RAD2ENC2(x) ((int32_t)(x / (float)0.000030712))
-#define RAD2ENC3(x) ((int32_t)(x / (float)-0.000032903))
-#define RAD2ENC4(x) ((int32_t)(x / (float)-0.000054786))
-#define RAD2ENC5(x) ((int32_t)(x / (float)-0.000163399))
+#define RAD2ENC1(x) ((int32_t)(x / (double)-0.000034142 ))
+#define RAD2ENC2(x) ((int32_t)( (x - (double)1.484) / (double)-0.000030712))
+#define RAD2ENC3(x) ((int32_t)(x / (double)0.000032903))
+#define RAD2ENC4(x) ((int32_t)(x / (double)0.000054786))
+#define RAD2ENC5(x) ((int32_t)(x / (double)0.000163399))
 
 #define MAX_TRAJECTORY_SIZE 10
 #define NUM_JUNTAS 5
@@ -85,8 +85,11 @@ ros::Subscriber<scorbot::JointVelocities> vel_sub("/scorbot/joint_velocities", &
 void on_trajectory(const std_msgs::Int32MultiArray& trajectory);
 ros::Subscriber<std_msgs::Int32MultiArray> trajectory_sub("/scorbot/joint_path_command_enc", &on_trajectory);
 
-control_msgs::FollowJointTrajectoryFeedback trajectory_feedback;
-ros::Publisher trajectory_feedback_pub("/scorbot/feedback_states", &trajectory_feedback);
+//control_msgs::FollowJointTrajectoryFeedback trajectory_feedback;
+//ros::Publisher trajectory_feedback_pub("/scorbot/feedback_states", &trajectory_feedback);
+
+//std_msgs::Empty goal_reached_msg;
+//ros::Publisher goal_reached_pub("/scorbot/goal_reached", &goal_reached_msg);
 
 /* debugging */
 std_msgs::Empty empty_msg;
@@ -95,12 +98,14 @@ ros::Publisher debug_pub("/scorbot/debug", &empty_msg);
 /********* variables globales ********/
 
 int32_t pos_juntas[NUM_JUNTAS];
-char* joint_names[] = { "joint1", "joint2", "joint3", "joint4", "joint5" };
+char* joint_names[] = { "base", "shoulder", "elbow", "pitch", "roll" };
 
-int32_t joint_trajectory_goals[MAX_TRAJECTORY_SIZE][NUM_JUNTAS];
+//int32_t joint_trajectory_goals[MAX_TRAJECTORY_SIZE][NUM_JUNTAS];
+int32_t joint_trajectory_goals[NUM_JUNTAS];
 bool reached_current_goal[NUM_JUNTAS] = { false, false, false, false, false };
 int current_goal_index = -1;
 int current_goal_length = 0;
+bool unreached_goal = false;
 
 enum ClawState {openClaw, closedClaw, holdingClaw};
 #define IDNAME(name) #name
@@ -152,7 +157,8 @@ void setup(void)
   nh.subscribe(claw_release_sub);
 
   nh.advertise(joint_state_pub);
-  nh.advertise(trajectory_feedback_pub);
+  //nh.advertise(trajectory_feedback_pub);
+  //nh.advertise(goal_reached_pub);
   nh.advertise(claw_caught_pub);
   
   nh.advertise(debug_pub);
@@ -166,30 +172,28 @@ void setup(void)
 void on_velocities(const scorbot::JointVelocities& vel_msg)
 {  
   current_goal_index = -1; /* desactiva la trayectoria actual */
-
   for (int i = 0; i < vel_msg.joint_velocities_length; i++)
   {
-    float vel = vel_msg.joint_velocities[i];
-    
+    float vel = vel_msg.joint_velocities[i]; /// (vel_msg.scaled_flag ? 1000 : 1);
     switch(i) {
       case 0:
-        if (vel == 0) set_position(1, pos_juntas[0]);
+        if (vel == 0.0) set_position(1, pos_juntas[0]);
         else set_speed_junta(0, vel);
       break;
       case 1:
-        if (vel == 0) set_position(2, pos_juntas[1]);
+        if (vel == 0.0) set_position(2, pos_juntas[1]);
         else set_speed_junta(1, vel);
       break;
       case 2:
-        if (vel == 0) set_position(3, pos_juntas[2]);        
+        if (vel == 0.0) set_position(3, pos_juntas[2]);        
         else set_speed_junta(2, vel);
       break;
       case 3:
-        if (vel == 0) set_position(4, pos_juntas[3]);        
+        if (vel == 0.0) set_position(4, pos_juntas[3]);        
         else set_speed_junta(3, vel);
       break;
       case 4:
-        if (vel == 0) set_position(5, pos_juntas[4]);        
+        if (vel == 0.0) set_position(5, pos_juntas[4]);        
         else set_speed_junta(4, vel);
       break;
     }
@@ -223,6 +227,7 @@ void on_catch(const std_msgs::Empty& msg){
       stateClaw = closedClaw;
     }else if(clawIsHolding){
       stateClaw = holdingClaw;
+      claw_caught_pub.publish(&empty_msg);
     }
     digitalWrite(sendInterruptToClawPin, 0);
   }
@@ -257,15 +262,13 @@ void on_release(const std_msgs::Empty& msg){
 
 //void on_trajectory(const scorbot::JointTrajectory& trajectory)
 void on_trajectory(const std_msgs::Int32MultiArray& trajectory)
-{
-  debug_pub.publish(&empty_msg);
+{ 
+  //current_goal_length = trajectory.data_length/ 5;
+  //if (current_goal_length > MAX_TRAJECTORY_SIZE || current_goal_length == 0) return;
   
-  current_goal_length = trajectory.data_length/ 5;
-  if (current_goal_length > MAX_TRAJECTORY_SIZE || current_goal_length == 0) return;
+  //current_goal_index = 0;
   
-  current_goal_index = 0;
-  
-  for (int i = 0; i < current_goal_length; i++)
+  /*for (int i = 0; i < current_goal_length; i++)
   {
     debug_pub.publish(&empty_msg);
     joint_trajectory_goals[i][0] = trajectory.data[i*NUM_JUNTAS+0];
@@ -273,24 +276,38 @@ void on_trajectory(const std_msgs::Int32MultiArray& trajectory)
     joint_trajectory_goals[i][2] = trajectory.data[i*NUM_JUNTAS+2];
     joint_trajectory_goals[i][3] = trajectory.data[i*NUM_JUNTAS+3];
     joint_trajectory_goals[i][4] = trajectory.data[i*NUM_JUNTAS+4];
-  }
-  debug_pub.publish(&empty_msg);
+  }*/
+
+  /**/
+  joint_trajectory_goals[0] = trajectory.data[0];
+  joint_trajectory_goals[1] = trajectory.data[1];
+  joint_trajectory_goals[2] = trajectory.data[2];
+  joint_trajectory_goals[3] = trajectory.data[3];
+  joint_trajectory_goals[4] = trajectory.data[4];
+  
   
   reached_current_goal[0] = false;
   reached_current_goal[1] = false;
   reached_current_goal[2] = false;
   reached_current_goal[3] = false;
-  reached_current_goal[4] = false;  
+  reached_current_goal[4] = false;
+
+  unreached_goal = true;  
   
-  debug_pub.publish(&empty_msg);
   /* set initial point as goal */
+  /*
   set_position(1, joint_trajectory_goals[0][0]);
   set_position(2, joint_trajectory_goals[0][1]);
   set_position(3, joint_trajectory_goals[0][2]);
   set_position(4, joint_trajectory_goals[0][3]);
   set_position(5, joint_trajectory_goals[0][4]); 
+  */
+  set_position(1, joint_trajectory_goals[0]);
+  set_position(2, joint_trajectory_goals[1]);
+  set_position(3, joint_trajectory_goals[2]);
+  set_position(4, joint_trajectory_goals[3]);
+  set_position(5, joint_trajectory_goals[4]); 
   
-  debug_pub.publish(&empty_msg); 
 }
 
 void publish_state(void)
@@ -311,6 +328,7 @@ void publish_state(void)
   positions[4] = ENC2RAD5(pos_juntas[4]);  
   joint_state_pub.publish(&joint_state);
   
+  /*
   trajectory_feedback.header.stamp = nh.now();
   trajectory_feedback.joint_names_length = NUM_JUNTAS;
   trajectory_feedback.joint_names = joint_names;
@@ -321,11 +339,18 @@ void publish_state(void)
   }
   else {
     trajectory_feedback.desired.positions_length = NUM_JUNTAS;
+    
     desired_positions[0] = ENC2RAD1(joint_trajectory_goals[current_goal_index][0]);
     desired_positions[1] = ENC2RAD2(joint_trajectory_goals[current_goal_index][1]);
     desired_positions[2] = ENC2RAD3(joint_trajectory_goals[current_goal_index][2]);
     desired_positions[3] = ENC2RAD4(joint_trajectory_goals[current_goal_index][3]);
     desired_positions[4] = ENC2RAD5(joint_trajectory_goals[current_goal_index][4]);    
+    
+    desired_positions[0] = ENC2RAD1(joint_trajectory_goals[0]);
+    desired_positions[1] = ENC2RAD2(joint_trajectory_goals[1]);
+    desired_positions[2] = ENC2RAD3(joint_trajectory_goals[2]);
+    desired_positions[3] = ENC2RAD4(joint_trajectory_goals[3]);
+    desired_positions[4] = ENC2RAD5(joint_trajectory_goals[4]);
     trajectory_feedback.desired.positions = desired_positions;
   }
   trajectory_feedback.desired.accelerations_length = 0;
@@ -344,6 +369,8 @@ void publish_state(void)
   trajectory_feedback.actual.effort_length = 0;
 
   trajectory_feedback_pub.publish(&trajectory_feedback);
+  */
+  
 }
 
 /***************** i2c **************/
@@ -560,28 +587,39 @@ void print_status(void) {
 #define JOINT_GOAL_TOLERANCE 100
 void check_trajectory_goal(void)
 {
-  if (current_goal_index == -1) return; // no goal set
+  //if (current_goal_index == -1) return; // no goal set
+  if (!unreached_goal) return; // no goal set
   
   bool this_goal_complete = true;
   for (int i = 0; i < NUM_JUNTAS; i++)
   {
     if (!reached_current_goal[i]) {
-      if (abs(joint_trajectory_goals[current_goal_index][i] - pos_juntas[i]) <= JOINT_GOAL_TOLERANCE) reached_current_goal[i] = true;
+      //if (abs(joint_trajectory_goals[current_goal_index][i] - pos_juntas[i]) <= JOINT_GOAL_TOLERANCE) reached_current_goal[i] = true;
+      if (abs(joint_trajectory_goals[i] - pos_juntas[i]) <= JOINT_GOAL_TOLERANCE) reached_current_goal[i] = true;
       else this_goal_complete = false;
     }
   }
   
   if (this_goal_complete) {
-    current_goal_index++; // advance to next point
-    if (current_goal_length == current_goal_index) current_goal_index = -1; // completed trajectory
-    else {      
+    //current_goal_index++; // advance to next point
+    //if (current_goal_length == current_goal_index) current_goal_index = -1; // completed trajectory
+    //else {      
       /* set current point as new goal */
+      /*
       set_position(1, joint_trajectory_goals[current_goal_index][0]);
       set_position(2, joint_trajectory_goals[current_goal_index][1]);
       set_position(3, joint_trajectory_goals[current_goal_index][2]);
       set_position(4, joint_trajectory_goals[current_goal_index][3]);
       set_position(5, joint_trajectory_goals[current_goal_index][4]);  
-    }
+      */
+    //}
+    reached_current_goal[0] = false;
+    reached_current_goal[1] = false;
+    reached_current_goal[2] = false;
+    reached_current_goal[3] = false;
+    reached_current_goal[4] = false;
+    unreached_goal = false;
+    //goal_reached_pub.publish(&goal_reached_msg);
   }  
 }
 
@@ -589,8 +627,11 @@ void check_trajectory_goal(void)
 /******************** main loop ***********************/
 void loop(void)
 {
+  #if SERIAL_DEBUG
+  Serial.println("checkeando posiciones");
+  #endif
   get_pos_juntas();
-  check_trajectory_goal();
+  //check_trajectory_goal();
   
   #if SERIAL_DEBUG
   serial_process();
@@ -600,8 +641,9 @@ void loop(void)
   publish_state();
   #endif
   int clawIsHolding = digitalRead(isHoldingClawPin);
-  if(clawIsHolding){
+  if(clawIsHolding && stateClaw == closedClaw){
     stateClaw = holdingClaw;
+    claw_caught_pub.publish(&empty_msg);
   }
   delay(100);
 }
@@ -621,12 +663,12 @@ void setear_constantes(void)
   constants.kd_vel = 0.1;
   constants.vel_max = 3;
   constants.vel_min = 0;
-  constants.kp_pos = 0.003;
-  constants.ki_pos = 0.0005;
+  constants.kp_pos = 0.008;
+  constants.ki_pos = 0.001;
   constants.kd_pos = 0.001;
   //le pongo otras constantes aggresive para cuando estoy muy lejos  */
-  constants.agg_kp_pos = 0.0025;
-  constants.agg_ki_pos = 0.001;
+  constants.agg_kp_pos = 0.007;
+  constants.agg_ki_pos = 0.005;
   constants.agg_kd_pos = 0.001;  
   set_constants(1, constants);
   #endif  
